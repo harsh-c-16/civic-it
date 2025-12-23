@@ -1,0 +1,71 @@
+# SentimentPulse watch-list
+# Civic-issue focus: public discourse about local governance in Pune, India.
+# We track ISSUES (water, roads, transport...), never named individuals.
+
+project:
+  name: "SentimentPulse"
+  focus: "Public sentiment on civic issues in Pune, India"
+
+# Subreddits to search within for relevant public discussion.
+subreddits:
+  - pune
+  - india
+  - Maharashtra
+  - mumbai
+
+# Search terms used to pull relevant posts from the subreddits above.
+# Keep these issue/location oriented, not person oriented.
+search_keywords:
+  - "Pune water supply"
+  - "Pune roads potholes"
+  - "Pune traffic"
+  - "Pune metro"
+  - "Pune municipal corporation"
+  - "PMC garbage"
+  - "Pune public transport"
+  - "Pune development"
+  - "Pune civic"
+
+# Issue categories for topic classification (English + Marathi keywords).
+# These supplement the built-in defaults in app/services/topics.py.
+topics:
+  WATER:
+    - "water"
+    - "पाणी"
+    - "tanker"
+    - "water supply"
+  INFRASTRUCTURE:
+    - "road"
+    - "pothole"
+    - "खड्डे"
+    - "रस्ता"
+    - "metro"
+    - "मेट्रो"
+    - "traffic"
+    - "वाहतूक"
+    - "bridge"
+    - "flyover"
+  CORRUPTION:
+    - "corrupt"
+    - "भ्रष्टाचार"
+    - "scam"
+    - "घोटाळा"
+    - "bribe"
+  ENVIRONMENT:
+    - "garbage"
+    - "कचरा"
+    - "pollution"
+    - "प्रदूषण"
+    - "cleanliness"
+    - "स्वच्छता"
+  TRANSPORT:
+    - "bus"
+    - "pmpml"
+    - "public transport"
+    - "parking"
+    - "पार्किंग"
+  DEVELOPMENT:
+    - "development"
+    - "विकास"
+    - "smart city"
+    - "स्मार्ट सिटी"
