@@ -1,0 +1,27 @@
+# Render.com blueprint for SentimentPulse
+# Single web service. Uses SQLite on the instance disk; data is re-ingested
+# on startup, so an ephemeral filesystem is fine for a demo.
+
+services:
+  - type: web
+    name: sentimentpulse
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DEBUG
+        value: "false"
+      - key: INGESTION_INTERVAL_MINUTES
+        value: "30"
+      # Optional: set these to pull live Reddit data instead of seed data.
+      - key: REDDIT_CLIENT_ID
+        sync: false
+      - key: REDDIT_CLIENT_SECRET
+        sync: false
+      - key: REDDIT_USER_AGENT
+        value: "sentimentpulse/2.0 (civic sentiment demo)"
+      # Optional: set to enable the manual /api/trigger/* endpoints.
+      - key: ADMIN_TOKEN
+        sync: false
