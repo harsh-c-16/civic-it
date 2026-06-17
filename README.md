@@ -1,124 +1,122 @@
-# SentimentPulse 📊
+# SentimentPulse
 
-**Transparent, aggregate sentiment monitoring for civic issues.**
+A small backend service that tracks public sentiment around civic issues. It
+pulls posts from Reddit about local-governance topics (water, roads, transport,
+corruption, environment, and so on), tags each one with a sentiment label and a
+topic, stores the results, and serves them through a read-only dashboard and a
+JSON API.
 
-SentimentPulse ingests public discussion about local-governance issues (water,
-roads, transport, corruption, environment…), enriches each post with sentiment
-and a topic label, and serves the results through a read-only dashboard and a
-small REST API.
+The focus of the project is the data pipeline: scheduled ingestion, async I/O,
+and a clean separation between fetching, enrichment, and serving. It targets
+Pune, India and handles both English and Marathi text.
 
-It is a backend portfolio project. The emphasis is on a clean asynchronous data
-pipeline rather than on being a product.
+A note on scope: sentiment is only ever aggregated over *issues*, never over
+named people. Scores are model estimates and are shown in aggregate. The data is
+public and the dashboard is read-only. It's a technical project, not affiliated
+with any campaign or party.
 
-> **Scope & ethics.** Sentiment is tracked over *issues*, never over named
-> individuals. All sentiment scores are model-estimated, approximate, and shown
-> in aggregate only. The dashboard is read-only and uses public data. This is a
-> technical demo and is not affiliated with any campaign, party, or candidate.
-
----
-
-## Architecture
+## How it works
 
 ```
-                ┌──────────────────────────────────────────┐
-   Reddit API   │  Ingestion worker   →   Postgres/SQLite   │
-  (or seed set) │  (scheduled)            (async SQLAlchemy)│
-                │        │                       ▲          │
-                │        ▼                       │          │
-                │  Processing worker  ───────────┘          │
-                │  (VADER + topics)                         │
-                │        │                                  │
-                │        ▼                                  │
-                │   FastAPI REST API   →   Dashboard (JS)   │
-                └──────────────────────────────────────────┘
+Reddit API (or seed data)
+        |
+        v
+  Ingestion worker  -->  database (async SQLAlchemy)
+        |                      ^
+        v                      |
+ Processing worker  -----------+
+ (sentiment + topic)
+        |
+        v
+   FastAPI  -->  dashboard + JSON API
 ```
 
-- **Ingestion worker** pulls posts for a configured watch-list of civic-issue
-  search terms from the Reddit API (application-only OAuth). Queries fan out
-  **concurrently** (`asyncio.gather`) under a **`Semaphore`** that caps in-flight
-  requests for rate-limiting, with **retry + exponential backoff** per request.
-- Posts are persisted **idempotently** (SAVEPOINT + unique constraint), so
-  overlapping runs or duplicate results never double-insert.
-- **Processing worker** scores unprocessed posts for sentiment and detects the
-  civic issue/topic.
-- Both run on an **APScheduler** loop inside the FastAPI app lifespan, and both
-  record throughput/latency/error **metrics** exposed at `/api/stats`.
-- The **API** exposes aggregate summaries, per-issue breakdowns, hourly trends,
-  and a paginated post feed.
+Two background jobs run inside the FastAPI app on an APScheduler loop:
 
-### Engineering highlights
-- **Concurrency & synchronization** — bounded concurrent I/O fan-out with an
-  `asyncio.Semaphore`.
-- **Reliability** — retry/backoff, idempotent writes, graceful seed-data
-  fallback, health check.
-- **Observability** — per-stage latency, throughput, and error-rate metrics.
+- **Ingestion** runs every `INGESTION_INTERVAL_MINUTES` (default 15). For each
+  subreddit/keyword pair it sends a search request to Reddit's OAuth API. The
+  requests fan out concurrently with `asyncio.gather`, capped by an
+  `asyncio.Semaphore` so we stay inside rate limits, and each request retries
+  with exponential backoff. Posts are written idempotently, so overlapping runs
+  never create duplicates. If Reddit credentials are missing or a run fails, it
+  falls back to the bundled `seed_data.json` so the app still has data to show.
+- **Processing** runs every 2 minutes. It picks up unprocessed posts in batches,
+  scores each with VADER (plus a small Marathi lexicon for Devanagari text), and
+  assigns a topic by keyword matching.
 
-### Tech stack
-Python 3.12 · FastAPI · async SQLAlchemy 2.0 · SQLite (Postgres-ready via
-asyncpg) · APScheduler · httpx · VADER (+ a small Marathi lexicon) · Jinja2 +
-Chart.js · Docker.
+Both stages update in-process counters (throughput, latency, retries, failures)
+that are exposed at `/api/stats`.
 
----
+## Tech
 
-## Data sources
+Python 3.13, FastAPI, async SQLAlchemy 2.0, SQLite by default (Postgres works
+via asyncpg), APScheduler, httpx, vaderSentiment, Jinja2 + Chart.js, Docker.
 
-| Source | When used |
-|--------|-----------|
-| **Reddit API** | When `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` are set. |
-| **Bundled seed dataset** (`seed_data.json`) | Otherwise — clearly labelled sample data so the app runs with zero setup. |
-
-To use live Reddit data, create a *script* app at
-<https://www.reddit.com/prefs/apps> and set the credentials in `.env`.
-
----
-
-## Run locally
+## Running it
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-Open <http://localhost:8000>. On first boot the app ingests the watch-list
-(Reddit if configured, otherwise the seed dataset) and processes it, so the
-dashboard is populated immediately.
+Then open http://localhost:8000. On the first boot the app ingests and processes
+the watch-list, so the dashboard isn't empty.
 
-### With Docker
+There's also a Makefile:
+
+```bash
+make install   # install deps
+make dev       # run with reload
+make test      # run tests
+```
+
+### Docker
 
 ```bash
 docker build -t sentimentpulse .
 docker run -p 8000:8000 sentimentpulse
 ```
 
----
+## Reddit credentials
+
+Without credentials the app runs on the seed dataset. To pull live data, create
+a "script" app at https://www.reddit.com/prefs/apps and set these in `.env`:
+
+```
+REDDIT_CLIENT_ID=...
+REDDIT_CLIENT_SECRET=...
+REDDIT_USER_AGENT=sentimentpulse/2.0 (civic sentiment demo)
+```
+
+Copy `.env.example` to `.env` for the full list of settings (ingestion interval,
+concurrency limits, retry count, database URL, admin token).
 
 ## API
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /health` | Health + post count |
-| `GET /api/summary` | Overall sentiment counts/percentages + top issues |
-| `GET /api/topics` | Sentiment breakdown per civic issue |
+| Endpoint | What it returns |
+|----------|-----------------|
+| `GET /health` | Status and post count |
+| `GET /api/summary` | Overall sentiment counts/percentages and top issues |
+| `GET /api/topics` | Sentiment breakdown per issue |
 | `GET /api/trends` | Hourly sentiment time series |
-| `GET /api/recent_posts` | Paginated post feed (filters: `sentiment`, `topic`) |
-| `GET /api/stats` | Pipeline metrics: throughput, latency, error rates, backlog |
-| `GET /api/keywords` | The configured watch-list (transparency) |
+| `GET /api/recent_posts` | Paginated feed (filters: `sentiment`, `topic`) |
+| `GET /api/stats` | Pipeline metrics and backlog |
+| `GET /api/keywords` | The configured watch-list |
 
-All accept `?hours=` (default 168). Interactive docs at `/docs`.
+Most endpoints take `?hours=` (default 168, i.e. one week). Interactive docs are
+at `/docs`.
 
-Manual triggers (`POST /api/trigger/ingestion`, `/api/trigger/process`) are
-disabled unless `ADMIN_TOKEN` is set, then require an `X-Admin-Token` header.
-
----
+The manual triggers `POST /api/trigger/ingestion` and `POST /api/trigger/process`
+are disabled unless `ADMIN_TOKEN` is set, and then need an `X-Admin-Token`
+header.
 
 ## Configuration
 
-The watch-list lives in `config/keywords.yaml` — edit the subreddits, search
-terms, and topic keywords without touching code. App settings come from
-environment variables; see `.env.example`.
-
----
+The watch-list (subreddits, search terms, and topic keywords) lives in
+`config/keywords.yaml` and can be edited without touching code. Everything else
+comes from environment variables.
 
 ## Tests
 
@@ -126,14 +124,12 @@ environment variables; see `.env.example`.
 pytest
 ```
 
----
+## Limitations
 
-## Known limitations
-
-- Sentiment is **lexicon-based** (VADER + a small Marathi word list). It is fast
-  and dependency-light but less accurate than a transformer model, especially on
-  sarcasm, code-mixed text, and longer Marathi passages.
-- Topic detection is keyword-matching, not a trained classifier.
+- Sentiment is lexicon-based (VADER plus a hand-built Marathi word list). It's
+  fast and has no heavy dependencies, but it's weaker than a transformer model
+  on sarcasm and code-mixed text.
+- Topic detection is keyword matching, not a trained classifier.
 - The seed dataset is small sample data, not real measurements.
 
 ---
